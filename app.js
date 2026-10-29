@@ -75,8 +75,8 @@
 
   // ---------- pantalla 1: familias ----------
   function inicio() {
-    header("Caminata CC-101", "Checklist de protocolos · 100% avance", false);
-    let html = `<h2>1. Elige la familia</h2>`;
+    header("Caminata de entrega", "Checklist de protocolos · 100% avance", false);
+    let html = `<h2>1. Elige el sistema</h2>`;
     D.familias.forEach(f => {
       const subs = D.subsistemas.filter(s => s.familia === f);
       const aptos = subs.filter(s => { const st = store.get(KEY + s.id, null); return st && calc(s, state(s.id)).apto; }).length;
@@ -250,6 +250,7 @@
           <button class="btn block" id="share">Enviar / compartir PDF</button>
           <button class="btn sec block" id="dl">Descargar PDF</button>
           <button class="btn sec block" id="mail">Abrir correo</button>
+          <button class="btn block" id="home" style="background:#1E7B3A">Volver al inicio</button>
         </div>
       </div>`;
     const pad = signaturePad(document.getElementById("sig"), document.getElementById("sigPh"));
@@ -289,6 +290,7 @@
         try { await navigator.share({ files: [pdfFile], title: pdfFile.name, text: txt }); } catch (e) { /* cancelado */ }
       } else { descargar(pdfFile, pdfFile.name); toast("Tu navegador no permite compartir archivos: se descargó el PDF"); }
     });
+    document.getElementById("home").addEventListener("click", () => go("#/"));
     document.getElementById("dl").addEventListener("click", () => pdfFile && descargar(pdfFile, pdfFile.name));
     document.getElementById("mail").addEventListener("click", () => {
       const to = v("fCorreo");
