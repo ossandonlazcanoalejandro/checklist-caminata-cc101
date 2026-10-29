@@ -245,6 +245,7 @@
         <button class="btn sec block" id="sigClear">Borrar firma</button>
         ${c.apto ? "" : `<p class="muted"><b>Atención:</b> el PDF quedará marcado como NO APTO y no habilita la caminata.</p>`}
         <button class="btn block" id="genPdf">Generar PDF firmado</button>
+        <p class="muted" id="pdfErr" hidden style="color:#A61B1B;word-break:break-word"></p>
         <div id="after" hidden>
           <button class="btn block" id="share">Enviar / compartir PDF</button>
           <button class="btn sec block" id="dl">Descargar PDF</button>
@@ -260,12 +261,25 @@
       if (pad.isEmpty()) return toast("Falta la firma");
       store.set("cc101:firmante", f);
       const t = ahora(); const docId = `CC101-${sub.id}-${t.id}`;
+      const errBox = document.getElementById("pdfErr"); errBox.hidden = true;
+      const etapa = { v: "preparación" };
       try {
-        const bytes = await buildPdf(sub, pl, s, c, f, pad.png(), t.txt, docId);
-        pdfFile = new File([bytes], `Caminata_${sub.id}_${c.apto ? "APTO" : "NO_APTO"}_${t.id}.pdf`, { type: "application/pdf" });
+        etapa.v = "firma (imagen)"; const sig = pad.images();
+        etapa.v = "documento";
+        const bytes = await buildPdf(sub, pl, s, c, f, sig, t.txt, docId, etapa);
+        etapa.v = "archivo";
+        const name = `Caminata_${sub.id}_${c.apto ? "APTO" : "NO_APTO"}_${t.id}.pdf`;
+        try { pdfFile = new File([bytes], name, { type: "application/pdf" }); }
+        catch (e) { pdfFile = new Blob([bytes], { type: "application/pdf" }); pdfFile.name = name; }
+        etapa.v = "registro";
         s.validaciones.push({ fecha: t.txt, nombre: f.nombre, resultado: c.apto ? "APTO" : "NO APTO", docId }); save(sub.id, s);
         document.getElementById("after").hidden = false; toast("PDF generado");
-      } catch (err) { console.error(err); toast("Error al generar el PDF"); }
+      } catch (err) {
+        console.error(err);
+        errBox.hidden = false;
+        errBox.textContent = `No se pudo generar el PDF (etapa: ${etapa.v}). Detalle: ${err && (err.message || err)}`;
+        toast("Error al generar el PDF – ver detalle");
+      }
     });
     document.getElementById("share").addEventListener("click", async () => {
       if (!pdfFile) return;
@@ -314,12 +328,18 @@
       clear: () => { strokes.length = 0; size(); },
       isEmpty: () => !strokes.some(st => st.length > 1),
       png: () => { const off = document.createElement("canvas"); off.width = 900; off.height = 360;
-        paint(off.getContext("2d"), 900, 360, 5); return off.toDataURL("image/png"); }
+        paint(off.getContext("2d"), 900, 360, 5); return off.toDataURL("image/png"); },
+      images: () => { // PNG transparente + JPEG con fondo blanco (respaldo para Safari/iPad)
+        const off = document.createElement("canvas"); off.width = 600; off.height = 240; const g = off.getContext("2d");
+        paint(g, 600, 240, 4); const png = off.toDataURL("image/png");
+        g.globalCompositeOperation = "destination-over"; g.fillStyle = "#FFFFFF"; g.fillRect(0, 0, 600, 240);
+        return { png, jpg: off.toDataURL("image/jpeg", 0.92) }; }
     };
   }
 
   // ---------- PDF ----------
-  const pdfSafe = s => String(s ?? "").replace(/[–—]/g, "-").replace(/[“”]/g, '"').replace(/[‘’]/g, "'").replace(/≤/g, "<=")
+  const pdfSafe = s => String(s ?? "").normalize("NFC").replace(/\t/g, " ").replace(/[\u0000-\u0008\u000B-\u001F\u007F-\u009F\u00AD]/g, "")
+    .replace(/[\u00A0\u2007\u202F]/g, " ").replace(/[–—−]/g, "-").replace(/[“”]/g, '"').replace(/[‘’]/g, "'").replace(/≤/g, "<=")
     .replace(/≥/g, ">=").replace(/…/g, "...").replace(/[^\x00-\xFF]/g, "");
   function wrap(text, font, size, width) {
     const out = [];
@@ -337,7 +357,7 @@
     return out;
   }
   // PDF con el mismo formato de la planilla Excel (01_Plantillas_Genericas_CC-101.xlsx): carta horizontal.
-  async function buildPdf(sub, pl, s, c, f, sigPng, fecha, docId) {
+  async function buildPdf(sub, pl, s, c, f, sig, fecha, docId, etapa = { v: "" }) {
     const { PDFDocument, StandardFonts, rgb } = PDFLib;
     const hex = h => rgb(parseInt(h.slice(0, 2), 16) / 255, parseInt(h.slice(2, 4), 16) / 255, parseInt(h.slice(4, 6), 16) / 255);
     const C = { navy: hex("1F3864"), navy2: hex("2F5597"), lblue: hex("D9E1F2"), grey: hex("E7E6E6"), line: hex("A6A6A6"), white: rgb(1, 1, 1),
@@ -428,7 +448,11 @@
     cell(fx, fw[0], sigH, "ITO / Inspección Codelco", { size: 7, align: "right" }); fx += fw[0];
     cell(fx, fw[1], sigH, f.nombre, { size: 7.5, align: "center" }); fx += fw[1];
     cell(fx, fw[2], sigH, "");
-    const img = await doc.embedPng(sigPng), sc = Math.min((fw[2] - 6) / img.width, (sigH - 6) / img.height);
+    etapa.v = "insertar firma";
+    let img;
+    try { img = await doc.embedPng(sig.png); } catch (e) { img = await doc.embedJpg(sig.jpg); }
+    etapa.v = "documento (cierre)";
+    const sc = Math.min((fw[2] - 6) / img.width, (sigH - 6) / img.height);
     page.drawImage(img, { x: fx + (fw[2] - img.width * sc) / 2, y: H - y - sigH + (sigH - img.height * sc) / 2, width: img.width * sc, height: img.height * sc });
     fx += fw[2];
     cell(fx, fw[3], sigH, fecha.replace(" ", "\n"), { size: 7, align: "center" });
@@ -444,9 +468,10 @@
     const pages = doc.getPages();
     pages.forEach((p, i) => {
       p.drawText(pdfSafe(`${sub.plantilla} – Checklist caminata 100% · ${sub.id} · Documento ${docId}`), { x: M, y: 16, size: 7, font: R, color: C.mut });
-      const t = `Página ${i + 1} de ${pages.length}`; p.drawText(t, { x: W - M - R.widthOfTextAtSize(t, 7), y: 16, size: 7, font: R, color: C.mut });
+      const t = pdfSafe(`Página ${i + 1} de ${pages.length}`); p.drawText(t, { x: W - M - R.widthOfTextAtSize(t, 7), y: 16, size: 7, font: R, color: C.mut });
     });
-    return await doc.save();
+    etapa.v = "guardar PDF";
+    return await doc.save({ useObjectStreams: false });
   }
 
   // ---------- inicio ----------

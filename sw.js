@@ -1,6 +1,6 @@
 // Service worker: guarda la app en el teléfono para que funcione sin señal (interior mina).
 // Al publicar una versión nueva (p. ej. data.js actualizado) cambie VERSION para forzar la actualización.
-const VERSION = "cc101-v2";
+const VERSION = "cc101-v3";
 const FILES = ["./", "index.html", "styles.css", "app.js", "data.js", "lib/pdf-lib.min.js", "manifest.webmanifest",
   "icons/icon-192.png", "icons/icon-512.png", "icons/apple-touch-icon.png"];
 self.addEventListener("install", e => { e.waitUntil(caches.open(VERSION).then(c => c.addAll(FILES))); self.skipWaiting(); });
