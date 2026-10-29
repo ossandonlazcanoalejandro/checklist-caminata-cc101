@@ -265,6 +265,7 @@
       const etapa = { v: "preparación" };
       try {
         etapa.v = "firma (imagen)"; const sig = pad.images();
+        etapa.v = "librería PDF"; await ensurePdfLib();
         etapa.v = "documento";
         const bytes = await buildPdf(sub, pl, s, c, f, sig, t.txt, docId, etapa);
         etapa.v = "archivo";
@@ -355,6 +356,19 @@
       out.push(line);
     });
     return out;
+  }
+  // Carga la librería de PDF si no vino con la página (p. ej. archivo no subido a GitHub).
+  function loadScript(src) {
+    return new Promise((ok, ko) => { const sc = document.createElement("script"); sc.src = src; sc.onload = ok; sc.onerror = ko; document.head.appendChild(sc); });
+  }
+  async function ensurePdfLib() {
+    if (window.PDFLib) return;
+    for (const src of ["pdf-lib.min.js", "lib/pdf-lib.min.js",
+                       "https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js",
+                       "https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"]) {
+      try { await loadScript(src); if (window.PDFLib) return; } catch (e) { /* probar la siguiente */ }
+    }
+    throw new Error("No se encontró pdf-lib.min.js. Súbalo a la raíz del repositorio de GitHub (o abra la app con señal).");
   }
   // PDF con el mismo formato de la planilla Excel (01_Plantillas_Genericas_CC-101.xlsx): carta horizontal.
   async function buildPdf(sub, pl, s, c, f, sig, fecha, docId, etapa = { v: "" }) {

@@ -13,9 +13,8 @@ Validar → Firma ITO / Inspección Codelco → PDF con el mismo formato de la p
 ## Publicar en GitHub Pages (una sola vez)
 1. Cree una cuenta en https://github.com.
 2. **+ → New repository** → nombre `checklist-caminata-cc101` → **Public** → **Create repository**.
-3. **Add file → Upload files** → arrastre todo el contenido de esta carpeta
-   (index.html, app.js, data.js, styles.css, sw.js, manifest.webmanifest, README.md y las carpetas `lib`, `icons`, `tools`)
-   → **Commit changes**.
+3. **Add file → Upload files** → seleccione los **13 archivos** de esta carpeta (no hay subcarpetas)
+   y arrástrelos juntos → **Commit changes**. Verifique que en el repositorio aparezca `pdf-lib.min.js`.
 4. **Settings → Pages** → Source: **Deploy from a branch** → Branch `main` / `(root)` → **Save**.
 5. En 1–2 minutos: `https://SU-USUARIO.github.io/checklist-caminata-cc101/`
 
@@ -30,10 +29,10 @@ La app se genera desde `01_Plantillas_Genericas_CC-101.xlsx`:
 
 Pasos:
 1. Instale Python y luego `pip install openpyxl`.
-2. Ejecute:
-   `python tools/excel_a_data.py 01_Plantillas_Genericas_CC-101.xlsx reporte_listado_wbs_74.xlsx data.js`
+2. En la carpeta `datos_para_actualizar_NO_SUBIR` ejecute:
+   `python excel_a_data.py 01_Plantillas_Genericas_CC-101.xlsx reporte_listado_wbs_74.xlsx data.js`
    (el reporte WBS aporta descripción, sistema y TAG de cada subsistema).
-3. En `sw.js` suba la versión: `cc101-v2` → `cc101-v3`.
+3. En `sw.js` suba la versión: `cc101-v4` → `cc101-v5`.
 4. Suba `data.js` y `sw.js` al repositorio (**Add file → Upload files**, se reemplazan).
    Los teléfonos toman la versión nueva la próxima vez que abran la app con señal.
 
