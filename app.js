@@ -16,6 +16,43 @@
     get(k, def) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : def; } catch (e) { return def; } },
     set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { toast("No se pudo guardar en el teléfono"); } }
   };
+  // ---------- fotos (IndexedDB: no cabe en localStorage) ----------
+  const MAX_FOTOS = 5;
+  const FOTOS = (() => {
+    let dbp = null;
+    const db = () => dbp || (dbp = new Promise((ok, ko) => {
+      const r = indexedDB.open("cc101-fotos", 1);
+      r.onupgradeneeded = () => { const os = r.result.createObjectStore("fotos", { keyPath: "id" }); os.createIndex("sub", "sub"); };
+      r.onsuccess = () => ok(r.result); r.onerror = () => ko(r.error);
+    }));
+    const tx = async (mode, fn) => { const d = await db();
+      return new Promise((ok, ko) => { const t = d.transaction("fotos", mode), rq = fn(t.objectStore("fotos")); let res;
+        if (rq) rq.onsuccess = () => { res = rq.result; };
+        t.oncomplete = () => ok(res); t.onerror = () => ko(t.error); t.onabort = () => ko(t.error || new Error("Sin espacio para guardar la foto")); }); };
+    const api = {
+      list: sub => tx("readonly", st => st.index("sub").getAll(sub)).then(a => (a || []).sort((x, y) => x.ts - y.ts)),
+      put: rec => tx("readwrite", st => st.put(rec)),
+      del: id => tx("readwrite", st => st.delete(id)),
+      all: () => tx("readonly", st => st.getAll()),
+      delSub: async sub => { for (const r of await api.list(sub)) await api.del(r.id); }
+    };
+    return api;
+  })();
+  function comprimir(file, max = 1280, q = 0.72) {
+    return new Promise((ok, ko) => {
+      const url = URL.createObjectURL(file), im = new Image();
+      im.onload = () => {
+        const k = Math.min(1, max / Math.max(im.naturalWidth, im.naturalHeight));
+        const w = Math.round(im.naturalWidth * k), h = Math.round(im.naturalHeight * k);
+        const cv = document.createElement("canvas"); cv.width = w; cv.height = h;
+        const g = cv.getContext("2d"); g.fillStyle = "#fff"; g.fillRect(0, 0, w, h); g.drawImage(im, 0, 0, w, h);
+        URL.revokeObjectURL(url); ok({ data: cv.toDataURL("image/jpeg", q), w, h });
+      };
+      im.onerror = () => { URL.revokeObjectURL(url); ko(new Error("Formato de imagen no compatible")); };
+      im.src = url;
+    });
+  }
+
   function toast(msg) {
     const t = document.getElementById("toast"); t.textContent = msg; t.classList.add("show");
     clearTimeout(toast._h); toast._h = setTimeout(() => t.classList.remove("show"), 2600);
@@ -92,17 +129,19 @@
     document.getElementById("bkExp").addEventListener("click", exportarRespaldo);
     document.getElementById("bkImp").addEventListener("change", importarRespaldo);
   }
-  function exportarRespaldo() {
+  async function exportarRespaldo() {
     const out = {};
     for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k.startsWith("cc101:")) out[k] = localStorage.getItem(k); }
+    try { out.__fotos__ = await FOTOS.all(); } catch (e) { out.__fotos__ = []; }
     const blob = new Blob([JSON.stringify(out)], { type: "application/json" });
     descargar(blob, `respaldo_caminata_cc101_${ahora().id}.json`);
   }
   function importarRespaldo(e) {
     const f = e.target.files[0]; if (!f) return;
-    f.text().then(t => { const o = JSON.parse(t); let n = 0;
+    f.text().then(async t => { const o = JSON.parse(t); let n = 0, nf = 0;
       Object.entries(o).forEach(([k, v]) => { if (k.startsWith("cc101:")) { localStorage.setItem(k, v); n++; } });
-      toast(`Respaldo importado (${n} registros)`); inicio();
+      for (const r of (o.__fotos__ || [])) { try { await FOTOS.put(r); nf++; } catch (e) { /* sin espacio */ } }
+      toast(`Respaldo importado (${n} checklists, ${nf} fotos)`); inicio();
     }).catch(() => toast("Archivo de respaldo no válido"));
   }
 
@@ -167,9 +206,24 @@
       </div>
       <h2>A. Validación de la citación</h2>
       <div class="card" id="qa">
-        <div class="q"><span>¿Planos red-line / as-built disponibles?</span>${seg("planos", SI_NO, s.qa.planos)}</div>
-        <div class="q"><span>¿Área limpia, ordenada, segura y accesible?</span>${seg("area", SI_NO, s.qa.area)}</div>
+        <div class="qblock"><div class="q"><span>¿Planos red-line / as-built disponibles?</span>${seg("planos", SI_NO, s.qa.planos)}</div>
+          <div class="fotos" id="fotos-planos"></div></div>
+        <div class="qblock"><div class="q"><span>¿Área limpia, ordenada, segura y accesible?</span>${seg("area", SI_NO, s.qa.area)}</div>
+          <div class="fotos" id="fotos-area"></div></div>
       </div>
+      <input type="file" id="inCam" accept="image/*" capture="environment" hidden>
+      <input type="file" id="inGal" accept="image/*" multiple hidden>
+      <div class="sheet" id="sheet" hidden><div class="sheet-in">
+        <p class="sheet-t">Adjuntar foto</p>
+        <button class="btn block" id="optCam">📷 Tomar foto ahora (cámara)</button>
+        <button class="btn sec block" id="optGal">🖼️ Elegir de la galería o archivos</button>
+        <p class="muted" style="margin:10px 2px 0">En PC o notebook ambas opciones abren el selector de archivos.</p>
+        <button class="btn sec block" id="optNo">Cancelar</button></div></div>
+      <div class="sheet" id="viewer" hidden><div class="sheet-in">
+        <img id="vImg" alt="Foto adjunta" style="width:100%;border-radius:10px;display:block">
+        <p class="muted" id="vCap"></p>
+        <button class="btn block" id="vDel" style="background:#A61B1B">Eliminar foto</button>
+        <button class="btn sec block" id="vClose">Cerrar</button></div></div>
       <h2>B. Verificación de protocolos (${pl.items.length})</h2><div id="protos">`;
     pl.items.forEach((it, i) => { html += protoCard(it, itemState(s, it), i + 1); });
     html += `</div><button class="btn sec block" id="reset">Reiniciar este checklist</button>
@@ -186,7 +240,55 @@
     }
     refreshStat();
 
+    // ----- fotos sección A
+    const QLAB = { planos: "Planos red-line / as-built", area: "Área limpia y accesible" };
+    let qActual = "planos", fotosSub = [], verId = null;
+    const sheet = document.getElementById("sheet"), viewer = document.getElementById("viewer");
+    async function drawFotos() {
+      try { fotosSub = await FOTOS.list(sub.id); } catch (e) { fotosSub = []; }
+      ["planos", "area"].forEach(q => {
+        const fs = fotosSub.filter(x => x.q === q), box = document.getElementById("fotos-" + q);
+        box.innerHTML = fs.map(x => `<img class="thumb" src="${x.data}" data-id="${esc(x.id)}" alt="Foto">`).join("") +
+          (fs.length < MAX_FOTOS ? `<button type="button" class="addfoto" data-q="${q}">📷 Adjuntar foto <span>${fs.length}/${MAX_FOTOS}</span></button>`
+                                 : `<span class="muted">${MAX_FOTOS}/${MAX_FOTOS} fotos (máximo)</span>`);
+      });
+    }
+    drawFotos();
+    async function agregar(files, origen) {
+      const ya = fotosSub.filter(x => x.q === qActual).length, libres = MAX_FOTOS - ya;
+      const lista = Array.from(files || []).slice(0, libres);
+      if (files && files.length > libres) toast(`Máximo ${MAX_FOTOS} fotos por pregunta: se agregaron ${lista.length}`);
+      for (const file of lista) {
+        try {
+          const c = await comprimir(file);
+          await FOTOS.put({ id: `${sub.id}|${qActual}|${Date.now()}${Math.random().toString(36).slice(2, 6)}`, sub: sub.id, q: qActual,
+                            ts: Date.now(), fecha: ahora().txt, origen, ...c });
+        } catch (err) { toast("No se pudo agregar la foto: " + (err.message || err)); }
+      }
+      s.updated || save(sub.id, s);
+      drawFotos();
+    }
+    const inCam = document.getElementById("inCam"), inGal = document.getElementById("inGal");
+    inCam.addEventListener("change", () => { agregar(inCam.files, "Cámara"); inCam.value = ""; });
+    inGal.addEventListener("change", () => { agregar(inGal.files, "Galería"); inGal.value = ""; });
+    document.getElementById("optCam").addEventListener("click", () => { sheet.hidden = true; inCam.click(); });
+    document.getElementById("optGal").addEventListener("click", () => { sheet.hidden = true; inGal.click(); });
+    document.getElementById("optNo").addEventListener("click", () => { sheet.hidden = true; });
+    sheet.addEventListener("click", e => { if (e.target === sheet) sheet.hidden = true; });
+    viewer.addEventListener("click", e => { if (e.target === viewer) viewer.hidden = true; });
+    document.getElementById("vClose").addEventListener("click", () => { viewer.hidden = true; });
+    document.getElementById("vDel").addEventListener("click", async () => {
+      if (!verId || !confirm("¿Eliminar esta foto?")) return;
+      await FOTOS.del(verId); viewer.hidden = true; drawFotos(); toast("Foto eliminada");
+    });
+
     document.getElementById("qa").addEventListener("click", e => {
+      const add = e.target.closest(".addfoto");
+      if (add) { qActual = add.dataset.q; document.querySelector("#sheet .sheet-t").textContent = "Adjuntar foto – " + QLAB[qActual]; sheet.hidden = false; return; }
+      const th = e.target.closest(".thumb");
+      if (th) { const x = fotosSub.find(f => f.id === th.dataset.id); if (!x) return; verId = x.id;
+        document.getElementById("vImg").src = x.data; document.getElementById("vCap").textContent = `${QLAB[x.q]} · ${x.fecha} · ${x.origen}`;
+        viewer.hidden = false; return; }
       const b = e.target.closest("button[data-v]"); if (!b) return;
       const g = b.parentElement, name = g.dataset.name;
       s.qa[name] = s.qa[name] === b.dataset.v ? "" : b.dataset.v;
@@ -212,8 +314,8 @@
     });
     document.getElementById("goVal").addEventListener("click", () => go("#/v/" + encodeURIComponent(sub.id)));
     document.getElementById("reset").addEventListener("click", () => {
-      if (!confirm("¿Borrar todas las respuestas de este checklist en este teléfono?")) return;
-      localStorage.removeItem(KEY + sub.id); checklist(sub); toast("Checklist reiniciado");
+      if (!confirm("¿Borrar todas las respuestas y fotos de este checklist en este teléfono?")) return;
+      localStorage.removeItem(KEY + sub.id); FOTOS.delSub(sub.id).catch(() => {}).then(() => { checklist(sub); toast("Checklist reiniciado"); });
     });
   }
 
@@ -268,7 +370,8 @@
         etapa.v = "firma (imagen)"; const sig = pad.images();
         etapa.v = "librería PDF"; await ensurePdfLib();
         etapa.v = "documento";
-        const bytes = await buildPdf(sub, pl, s, c, f, sig, t.txt, docId, etapa);
+        etapa.v = "fotos"; let fotos = []; try { fotos = await FOTOS.list(sub.id); } catch (e) { fotos = []; }
+        const bytes = await buildPdf(sub, pl, s, c, f, sig, t.txt, docId, etapa, fotos);
         etapa.v = "archivo";
         const name = `Caminata_${sub.id}_${c.apto ? "APTO" : "NO_APTO"}_${t.id}.pdf`;
         try { pdfFile = new File([bytes], name, { type: "application/pdf" }); }
@@ -373,7 +476,7 @@
     throw new Error("No se encontró pdf-lib.min.js. Súbalo a la raíz del repositorio de GitHub (o abra la app con señal).");
   }
   // PDF con el mismo formato de la planilla Excel (01_Plantillas_Genericas_CC-101.xlsx): carta horizontal.
-  async function buildPdf(sub, pl, s, c, f, sig, fecha, docId, etapa = { v: "" }) {
+  async function buildPdf(sub, pl, s, c, f, sig, fecha, docId, etapa = { v: "" }, fotos = []) {
     const { PDFDocument, StandardFonts, rgb } = PDFLib;
     const hex = h => rgb(parseInt(h.slice(0, 2), 16) / 255, parseInt(h.slice(2, 4), 16) / 255, parseInt(h.slice(4, 6), 16) / 255);
     const C = { navy: hex("1F3864"), navy2: hex("2F5597"), lblue: hex("D9E1F2"), grey: hex("E7E6E6"), line: hex("A6A6A6"), white: rgb(1, 1, 1),
@@ -415,10 +518,11 @@
       cell(M, span(0, 2), 13, k, { font: B, size: 7.5, fill: C.grey }); cell(cx[3], span(3, 9), 13, val, { font: B, size: 7.5 }); y += 13; });
     y += 8;
     cell(M, CW, 14, "A. VALIDACIÓN DE LA CITACIÓN A CAMINATA", { font: B, size: 8, fill: C.navy2, color: C.white }); y += 14;
-    [["¿Planos red-line / as-built disponibles?", s.qa.planos], ["¿Área limpia, ordenada, segura y accesible para la caminata?", s.qa.area]].forEach(([q, a]) => {
+    [["¿Planos red-line / as-built disponibles?", s.qa.planos, "planos"], ["¿Área limpia, ordenada, segura y accesible para la caminata?", s.qa.area, "area"]].forEach(([q, a, key]) => {
+      const nf = fotos.filter(x => x.q === key).length;
       cell(M, span(0, 4), 13, q, { size: 7.5 });
       cell(cx[5], span(5, 6), 13, a || "Sin respuesta", { font: B, size: 7.5, align: "center", fill: a === "Sí" ? C.okBg : C.badBg, color: a === "Sí" ? C.okTx : C.badTx });
-      cell(cx[7], span(7, 9), 13, ""); y += 13; });
+      cell(cx[7], span(7, 9), 13, nf ? `${nf} foto${nf > 1 ? "s" : ""} adjunta${nf > 1 ? "s" : ""} (ver anexo fotográfico)` : "Sin fotos", { size: 7, color: C.mut }); y += 13; });
     y += 8;
     cell(M, CW, 14, "B. VERIFICACIÓN DE PROTOCOLOS", { font: B, size: 8, fill: C.navy2, color: C.white }); y += 14;
     headRow();
@@ -479,6 +583,32 @@
       pend.push(...c.porConf.map(p => p + " (por confirmar)"), ...c.pend);
       wrap("Pendientes: " + pend.join(", "), R, 7, CW).forEach(l => {
         if (y + 10 > H - BOTTOM) newPage(); page.drawText(l, { x: M, y: H - y - 7, size: 7, font: R, color: C.mut }); y += 9.5; });
+    }
+    // anexo fotográfico (sección A)
+    if (fotos.length) {
+      etapa.v = "anexo fotográfico";
+      const gap = 8, colW = (CW - 2 * gap) / 3, imgH = 150, capH = 12;
+      newPage();
+      cell(M, CW, 22, "ANEXO FOTOGRÁFICO – A. VALIDACIÓN DE LA CITACIÓN A CAMINATA", { font: B, size: 11, fill: C.navy, color: C.white, align: "center" }); y += 22;
+      cell(M, CW, 13, `${sub.id} – ${sub.desc}  ·  TAG ${sub.tag || "—"}`, { size: 7.5, fill: C.navy2, color: C.white, align: "center" }); y += 21;
+      for (const [q, lab] of [["planos", "¿Planos red-line / as-built disponibles?"], ["area", "¿Área limpia, ordenada, segura y accesible para la caminata?"]]) {
+        const fs = fotos.filter(x => x.q === q); if (!fs.length) continue;
+        if (y + 20 + imgH + capH > H - BOTTOM) newPage();
+        cell(M, CW, 14, `${lab}  –  ${fs.length} foto${fs.length > 1 ? "s" : ""}`, { font: B, size: 8, fill: C.lblue }); y += 20;
+        for (let i = 0; i < fs.length; i += 3) {
+          if (y + imgH + capH > H - BOTTOM) newPage();
+          for (let k = 0; k < 3 && i + k < fs.length; k++) {
+            const ph = fs[i + k], x = M + k * (colW + gap);
+            let img; try { img = await doc.embedJpg(ph.data); } catch (e) { img = await doc.embedPng(ph.data); }
+            const sc = Math.min((colW - 6) / img.width, (imgH - 6) / img.height);
+            page.drawRectangle({ x, y: H - y - imgH, width: colW, height: imgH, borderColor: C.line, borderWidth: 0.5 });
+            page.drawImage(img, { x: x + (colW - img.width * sc) / 2, y: H - y - imgH + (imgH - img.height * sc) / 2, width: img.width * sc, height: img.height * sc });
+            page.drawText(pdfSafe(`Foto ${i + k + 1}  ·  ${ph.fecha || ""}  ·  ${ph.origen || ""}`), { x: x + 2, y: H - y - imgH - 9, size: 7, font: R, color: C.mut });
+          }
+          y += imgH + capH + 6;
+        }
+        y += 6;
+      }
     }
     // pie de página
     const pages = doc.getPages();

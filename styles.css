@@ -76,3 +76,13 @@ textarea { min-height: 64px; resize: vertical; }
   border-radius: 10px; font-size: 14px; opacity: 0; pointer-events: none; transition: opacity .2s; z-index: 50; max-width: 90vw; }
 #toast.show { opacity: .95; }
 @media (max-width: 420px) { .seg button { padding: 9px 9px; min-width: 44px; font-size: 13px; } .kv { grid-template-columns: 82px 1fr; } }
+/* fotos sección A */
+.qblock + .qblock { border-top: 1px solid var(--line); }
+.qblock .q { border-top: 0; }
+.fotos { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 0 0 12px; }
+.thumb { width: 64px; height: 64px; object-fit: cover; border-radius: 10px; border: 1px solid var(--line); cursor: pointer; }
+.addfoto { border: 1.5px dashed var(--navy2); background: #F5F8FD; color: var(--navy2); border-radius: 10px; padding: 10px 12px; font-weight: 650; font-size: 14px; cursor: pointer; }
+.addfoto span { color: var(--muted); font-weight: 500; margin-left: 4px; }
+.sheet { position: fixed; inset: 0; z-index: 60; background: rgba(15, 23, 42, .55); display: flex; align-items: flex-end; justify-content: center; }
+.sheet-in { background: #fff; width: 100%; max-width: 560px; border-radius: 18px 18px 0 0; padding: 18px 16px calc(18px + env(safe-area-inset-bottom)); max-height: 92vh; overflow: auto; }
+.sheet-t { font-weight: 700; margin: 0 0 6px; font-size: 16px; }
